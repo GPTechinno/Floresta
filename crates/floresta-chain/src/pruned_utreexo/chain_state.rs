@@ -258,7 +258,9 @@ impl<PersistedState: ChainStore> ChainState<PersistedState> {
     #[inline]
     /// Whether a node is the genesis block for this net
     fn is_genesis(&self, header: &BlockHeader) -> bool {
-        header.block_hash() == self.chain_params().genesis.block_hash()
+        // Comparing the headers is comparing their hashes, without hashing either of them or
+        // cloning the chain params. This runs at every step of the walks back along the chain.
+        *header == read_lock!(self).consensus.parameters.genesis.header
     }
 
     #[inline]
@@ -2725,6 +2727,31 @@ mod test {
         while let Ok(header) = BlockHeader::consensus_decode(&mut buffer) {
             chain.accept_header(header).unwrap();
         }
+    }
+
+    #[test]
+    fn test_is_genesis() {
+        for network in [Network::Bitcoin, Network::Signet, Network::Regtest] {
+            let chain = setup_test_chain(network, AssumeValidArg::Disabled, None);
+            let genesis = genesis_block(network).header;
+            assert!(chain.is_genesis(&genesis));
+
+            // Its child, and a header differing from it in the nonce only
+            let child = BlockHeader {
+                prev_blockhash: genesis.block_hash(),
+                ..genesis
+            };
+            let other_nonce = BlockHeader {
+                nonce: genesis.nonce.wrapping_add(1),
+                ..genesis
+            };
+            assert!(!chain.is_genesis(&child));
+            assert!(!chain.is_genesis(&other_nonce));
+        }
+
+        // Another network's genesis is not this one's
+        let chain = setup_test_chain(Network::Signet, AssumeValidArg::Disabled, None);
+        assert!(!chain.is_genesis(&genesis_block(Network::Bitcoin).header));
     }
 
     #[test]
