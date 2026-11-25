@@ -1408,9 +1408,9 @@ impl<PersistedState: ChainStore> UpdatableChainstate for ChainState<PersistedSta
                 height,
             )?;
 
-            // Move to the previous block
+            // Move to the previous block, whose hash this header holds
+            hash = header.prev_blockhash;
             header = self.get_ancestor(&header)?;
-            hash = header.block_hash();
         }
 
         // Update the tip and accumulator data with our assumed tip
@@ -2752,6 +2752,47 @@ mod test {
         // Another network's genesis is not this one's
         let chain = setup_test_chain(Network::Signet, AssumeValidArg::Disabled, None);
         assert!(!chain.is_genesis(&genesis_block(Network::Bitcoin).header));
+    }
+
+    #[test]
+    fn test_mark_chain_as_assumed() {
+        // The first 10,237 mainnet headers, with an accumulator assumed at height 5,000
+        let file = include_bytes!("../../testdata/headers.zst");
+        let uncompressed: Vec<u8> = zstd::decode_all(Cursor::new(file)).unwrap();
+        let mut buffer = uncompressed.as_slice();
+
+        let chain = setup_test_chain(Network::Bitcoin, AssumeValidArg::Hardcoded, None);
+        while let Ok(header) = BlockHeader::consensus_decode(&mut buffer) {
+            chain.accept_header(header).unwrap();
+        }
+
+        let assumed = chain.get_block_hash(5_000).unwrap();
+        let acc = Stump {
+            leaves: 5_001,
+            roots: vec![
+                BitcoinNodeHash::from([1; 32]),
+                BitcoinNodeHash::from([2; 32]),
+            ],
+        };
+        assert!(chain.mark_chain_as_assumed(acc.clone(), assumed).unwrap());
+
+        assert_eq!(chain.get_validation_index().unwrap(), 5_000);
+        assert_eq!(chain.acc(), acc);
+        assert_eq!(chain.get_best_block().unwrap().0, 10_236);
+
+        // Every header up to the assumed one is valid, the ones above it are still headers only
+        for height in 0..=10_236 {
+            let hash = chain.get_block_hash(height).unwrap();
+            match chain.get_disk_block_header(&hash).unwrap() {
+                DiskBlockHeader::FullyValid(header, h) if height <= 5_000 => {
+                    assert_eq!((header.block_hash(), h), (hash, height));
+                }
+                DiskBlockHeader::HeadersOnly(header, h) if height > 5_000 => {
+                    assert_eq!((header.block_hash(), h), (hash, height));
+                }
+                header => panic!("Unexpected header at height {height}: {header:?}"),
+            }
+        }
     }
 
     #[test]
