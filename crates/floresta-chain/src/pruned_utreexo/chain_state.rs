@@ -223,12 +223,17 @@ impl<PersistedState: ChainStore> ChainState<PersistedState> {
         Ok(())
     }
 
-    fn validate_header(&self, block_header: &BlockHeader) -> Result<BlockHash, BlockchainError> {
+    /// Validates `block_header`, whose hash is `block_hash` (computed once by the caller).
+    fn validate_header(
+        &self,
+        block_header: &BlockHeader,
+        block_hash: BlockHash,
+    ) -> Result<(), BlockchainError> {
         // As in Core, the header's own proof of work comes first: it is the cheap check, and the
         // ones below read the chain.
-        let block_hash = block_header
-            .validate_pow(block_header.target())
-            .map_err(|_| BlockValidationErrors::NotEnoughPow)?;
+        if !block_header.target().is_met_by(block_hash) {
+            Err(BlockValidationErrors::NotEnoughPow)?;
+        }
 
         let prev_block = self.get_disk_block_header(&block_header.prev_blockhash)?;
         let height = prev_block
@@ -252,7 +257,7 @@ impl<PersistedState: ChainStore> ChainState<PersistedState> {
             Err(BlockValidationErrors::BadVersion)?;
         }
 
-        Ok(block_hash)
+        Ok(())
     }
 
     #[inline]
@@ -1545,7 +1550,9 @@ impl<PersistedState: ChainStore> UpdatableChainstate for ChainState<PersistedSta
     }
 
     fn accept_header(&self, header: BlockHeader) -> Result<(), BlockchainError> {
-        let disk_header = self.get_disk_block_header(&header.block_hash());
+        // hashed once, for the lookup, the proof of work and the store
+        let block_hash = header.block_hash();
+        let disk_header = self.get_disk_block_header(&block_hash);
 
         match disk_header {
             Err(e @ BlockchainError::Database(_)) => {
@@ -1565,7 +1572,7 @@ impl<PersistedState: ChainStore> UpdatableChainstate for ChainState<PersistedSta
         let best_block = self.get_best_block()?;
 
         // Do validation in this header
-        let block_hash = self.validate_header(&header)?;
+        self.validate_header(&header, block_hash)?;
 
         // Update our current tip
         if header.prev_blockhash == best_block.1 {
