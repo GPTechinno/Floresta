@@ -993,25 +993,26 @@ impl<PersistedState: ChainStore> ChainState<PersistedState> {
         next_height: u32,
         next_header: &BlockHeader,
     ) -> Result<Target, BlockchainError> {
-        let params: ChainParams = self.chain_params();
+        // the consensus parameters only: cloning the chain params would clone the genesis block
+        let params = read_lock!(self).consensus.parameters.params.clone();
 
         // Outside a retarget height, testnets may allow min-difficulty blocks
         if next_height % 2016 != 0 {
-            if !params.params.allow_min_difficulty_blocks {
+            if !params.allow_min_difficulty_blocks {
                 return Ok(last_block.target());
             }
 
             // Special testnet rule, if a block takes more than 20 minutes to mine, we can
             // mine a block with diff 1
-            if u64::from(last_block.time) + params.params.pow_target_spacing * 2
+            if u64::from(last_block.time) + params.pow_target_spacing * 2
                 < u64::from(next_header.time)
             {
-                return Ok(params.params.max_attainable_target);
+                return Ok(params.max_attainable_target);
             }
 
             // Otherwise, require the target of the last block that wasn't mined under that rule,
             // stopping at the last retarget block
-            let min_difficulty_bits = params.params.max_attainable_target.to_compact_lossy();
+            let min_difficulty_bits = params.max_attainable_target.to_compact_lossy();
             let mut header = *last_block;
             let mut height = next_height - 1;
             while height % 2016 != 0 && header.bits == min_difficulty_bits {
@@ -1023,7 +1024,7 @@ impl<PersistedState: ChainStore> ChainState<PersistedState> {
         }
 
         // Regtest don't have retarget
-        if !params.params.no_pow_retargeting {
+        if !params.no_pow_retargeting {
             // Core reads both ends of the epoch from the new header's own ancestors
             // (`pindexLast->GetAncestor`), and the parent may be on a fork.
             let first_block = self.get_ancestor_at_height(
@@ -1035,11 +1036,11 @@ impl<PersistedState: ChainStore> ChainState<PersistedState> {
             let target =
                 Consensus::calc_next_work_required(last_block, &first_block, self.chain_params());
 
-            if target < params.params.max_attainable_target {
+            if target < params.max_attainable_target {
                 return Ok(target);
             }
 
-            return Ok(params.params.max_attainable_target);
+            return Ok(params.max_attainable_target);
         }
 
         Ok(last_block.target())
