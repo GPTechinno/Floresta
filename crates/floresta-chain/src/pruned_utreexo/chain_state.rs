@@ -217,7 +217,7 @@ impl<PersistedState: ChainStore> ChainState<PersistedState> {
     ) -> Result<(), BlockchainError> {
         let mut inner = write_lock!(self);
 
-        inner.chainstore.save_header(header)?;
+        inner.chainstore.save_header_with_hash(header, hash)?;
         inner.chainstore.update_block_index(height, hash)?;
 
         Ok(())

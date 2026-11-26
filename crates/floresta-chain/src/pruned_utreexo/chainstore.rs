@@ -149,6 +149,17 @@ pub trait ChainStore {
     /// the data we save.
     fn save_header(&mut self, header: &DiskBlockHeader) -> Result<(), Self::Error>;
 
+    /// Saves a block header whose hash the caller has, `hash`, so that a store can keep it without
+    /// hashing the header again. By default, as [ChainStore::save_header].
+    fn save_header_with_hash(
+        &mut self,
+        header: &DiskBlockHeader,
+        hash: BlockHash,
+    ) -> Result<(), Self::Error> {
+        let _ = hash;
+        self.save_header(header)
+    }
+
     /// Returns the block hash for a given height.
     fn get_block_hash(&self, height: u32) -> Result<Option<BlockHash>, Self::Error>;
 
